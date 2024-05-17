@@ -17,34 +17,6 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
 
-# def run_title_screen():
-#     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-#     pygame.display.set_caption("My Pool Game")
-
-#     font = pygame.font.Font(None, 36)
-#     title_text = font.render("Welcome to My Pool Game", True, WHITE)
-
-#     running = True
-#     while running:
-#         for event in pygame.event.get():
-#             if event.type == pygame.QUIT:
-#                 pygame.quit()
-#                 quit()
-
-#             if event.type == pygame.KEYDOWN:
-#                 if event.key == pygame.K_RETURN:  # Start game on Enter key press
-#                     running = False
-
-#         screen.fill(BLACK)
-#         screen.blit(title_text, (SCREEN_WIDTH // 2 - title_text.get_width() // 2, 250))
-#         pygame.display.flip()
-
-#     # Start the main game loop after title screen
-#     # You would call your main game function here
-#     # For example, main_game_loop()
-
-
-
 pygame.init()
 #fonts
 font = pygame.font.SysFont("Roboto", 50)
@@ -59,6 +31,7 @@ pygame.display.set_caption("Elipticki bilijar")
 space = pymunk.Space()
 static_body = space.static_body
 draw_options = pymunk.pygame_util.DrawOptions(screen)
+space.damping=0.5
 
 #clock
 clock = pygame.time.Clock()
@@ -70,7 +43,7 @@ score = 0
 dia = 36
 pocket_dia = 66
 force = 0
-max_force = 10000
+max_force = 12000
 force_direction = 1
 game_running = True
 cue_ball_potted = False
@@ -85,6 +58,9 @@ focal_points = []
 num_cushions = 300
 outer_bound = (-200, -200)
 
+#collision types
+collision_type_ball = 1
+collision_type_cushion = 2
 
 
 #loading images
@@ -92,14 +68,17 @@ cue_image = pygame.image.load("assets/images/cue.png").convert_alpha()
 table_image = pygame.image.load("assets/images/el_table2.png").convert_alpha()
 ball_images = []
 
+
 for i in range(1, 5):
    ball_image = pygame.image.load(f"assets/images/b{i}.png").convert_alpha()
    ball_images.append(ball_image)
+
 
 #text rendering
 def draw_text(text, font, text_col, x, y):
   img = font.render(text, True, text_col)
   screen.blit(img, (x, y))
+
 
 #function for creating balls
 def create_ball(radius, pos):
@@ -108,8 +87,8 @@ def create_ball(radius, pos):
   shape = pymunk.Circle(body, radius)
   shape.mass = 3.8
   shape.elasticity = 0.8
-  shape.collision_type = 1  
-  pivot = pymunk.PivotJoint(static_body, body, (0, 0), (0, 0))
+  shape.collision_type = collision_type_ball  #collision identificator
+  pivot = pymunk.PivotJoint(static_body, body, (0, 0), (0, 0)) #friction
   pivot.max_bias = 0 
   pivot.max_force = 1000 
   
@@ -121,6 +100,8 @@ c_val = math.sqrt((ellipse_a)**2 - (ellipse_b)**2)
 focal_points.append((ellipse_center[0] + c_val, ellipse_center[1]))
 focal_points.append((ellipse_center[0] - c_val, ellipse_center[1]))
 pocket = focal_points[1]
+
+
 
 
 #creating balls
@@ -143,10 +124,6 @@ def create_balls(diam):
 create_balls(dia)
 
 
-#creating focal point attributes for balls
-for ball in balls:
-    ball.focal_point_passed = False
-    ball.focal_shot_achieved = False 
 
 #creating cushion (ellipse approx)
 def sample_points_on_ellipse(a, b, num_points):
@@ -163,35 +140,39 @@ def create_cushion(a, b):
   shape = pymunk.Segment(body, a, b, 4)
   shape.elasticity = 0.8
   shape.friction = 0.796
-  shape.collision_type = 2
+  shape.collision_type = collision_type_cushion
   shape.color = (90, 160, 44, 0)
   
   space.add(body, shape)
-  space.damping=0.15#bug
 
+#create cushions
 for i in range(0, num_cushions):
   create_cushion((x[i], y[i]), (x[(i+1) % num_cushions], y[(i+1) % num_cushions]))
 
 
+#creating focal point attributes for balls
+for ball in balls:
+    ball.focal_point_passed = False
+    ball.focal_shot_achieved = False 
 
 #vector calculation
-def is_point_passed(ball_position, focal_point, radius):
+def is_focal_point_passed(ball_position, focal_point, radius):
     distance = ((ball_position[0] - focal_point[0]) ** 2 + (ball_position[1] - focal_point[1]) ** 2) ** 0.5
     return distance <= radius
 
 def normalize(vector):
     return vector / np.linalg.norm(vector)
 
+correction_factor = 0.5
 def calculate_focal_shot(impact_point, current_velocity):
   intensity = np.linalg.norm(impact_point-current_velocity)
   normalized_shot_vector = np.array(normalize(np.subtract(impact_point, focal_points[1])))
-  focal_shot_vector = 0.5*intensity * normalized_shot_vector
+  focal_shot_vector = correction_factor * intensity * normalized_shot_vector
   # print(focal_shot_vector)
   return (focal_shot_vector[0],focal_shot_vector[1])
 
 #ball-cushion collision handling
-collision_type_ball = 1
-collision_type_cushion = 2
+
 
 def ball_cushion_collision_handler(arbiter, space, data):
     ball, cushion = arbiter.shapes
@@ -208,14 +189,8 @@ def ball_cushion_collision_post_solve(arbiter, space, data):
     ball, cushion = arbiter.shapes
 
     if ball.focal_shot_achieved == True:
-      # print("FOCAL SHOT ACTION!")
       impact_point = arbiter.contact_point_set.points[0].point_a
-      # print("****impact****")
-      # print(impact_point)
-      # print("****vector****")
-      # print(ball.body.velocity) 
       current_velocity = ball.body.velocity
-      # print(np.linalg.norm(impact_point-current_velocity))
       ball.body.velocity = calculate_focal_shot(impact_point, current_velocity)
       ball.focal_shot_achieved = False
 
@@ -277,12 +252,14 @@ power_bar.fill(RED)
 run = True
 while run:
 
+  #limit framerate
   clock.tick(FPS)
+  #update simulation
   space.step(1 / FPS)
 
-  screen.fill(BG)
 
   #draw pool table
+  screen.fill(BG)
   screen.blit(table_image, (0, 0))
 
   #check if any balls have been potted
@@ -293,7 +270,7 @@ while run:
     if ball_dist <= pocket_dia / 2:
       score += ball_score_calculation(ball.type)
       #check if the potted ball was the cue ball
-      if i == len(balls) - 1:
+      if i == len(balls) - 1: 
         lives -= 1
         cue_ball_potted = True
         ball.body.position = (ellipse_center[0], ellipse_center[1])
@@ -306,7 +283,7 @@ while run:
         ball_images.pop(i)
 
   for ball in balls:
-    if is_point_passed(ball.body.position, focal_points[0], 10):
+    if is_focal_point_passed(ball.body.position, focal_points[0], dia/2):
       # print("focal point passed!")
       ball.focal_point_passed = True
 
@@ -323,29 +300,28 @@ while run:
   #drawing pool cue
   if taking_shot == True and game_running == True:
     if cue_ball_potted == True:
-      #reposition cue ball
-      balls[-1].body.position = (ellipse_center[0],ellipse_center[1])
+      # balls[-1].body.position = (ellipse_center[0],ellipse_center[1])
       cue_ball_potted = False
-    #calculating pool cue angle
+    #rotating pool cue 
     mouse_pos = pygame.mouse.get_pos()
     cue.rect.center = balls[-1].body.position
     x_dist = balls[-1].body.position[0] - mouse_pos[0]
-    y_dist = -(balls[-1].body.position[1] - mouse_pos[1]) # -ve because pygame y coordinates increase down the screen
+    y_dist = -(balls[-1].body.position[1] - mouse_pos[1]) 
     cue_angle = math.degrees(math.atan2(y_dist, x_dist))
     cue.update(cue_angle)
     cue.draw(screen)
 
   #powering up pool cue
   if powering_up == True and game_running == True:
-    force += 200 * force_direction
+    force += 130 * force_direction
     if force >= max_force or force <= 0:
       force_direction *= -1
-    #drawing power bars
+    #drawing powwer bars
     for b in range(math.ceil(force / 2000)):
       screen.blit(power_bar,
        (balls[-1].body.position[0] - 30 + (b * 15),
         balls[-1].body.position[1] + 30))
-  elif powering_up == False and taking_shot == True:
+  elif powering_up == False and taking_shot == True: #mouse up
     x_impulse = math.cos(math.radians(cue_angle))
     y_impulse = math.sin(math.radians(cue_angle))
     balls[-1].body.apply_impulse_at_local_point((force * -x_impulse, force * y_impulse), (0, 0))
@@ -381,7 +357,7 @@ while run:
     if event.type == pygame.QUIT:
       run = False
 
-  #space.debug_draw(draw_options)
+  # space.debug_draw(draw_options)
   pygame.display.update()
 
 pygame.quit()
